@@ -903,6 +903,16 @@ class AclLoader(object):
                     for namespace_configdb in self.per_npu_configdb.values():
                         namespace_configdb.set_entry(self.ACL_RULE, key, None)
 
+    def show_running_config(self):
+        """
+        Show ACL running configuration.
+        :return:
+        """
+        #formated_running_config = {"ACL_TABLE": {str(key): value for key, value in self.tables_db_info.items()},"ACL_RULE": {str(key).replace(", ", "|").replace("'", "").replace("(", "").replace(")", ""): value for key, value in self.rules_db_info.items()}}
+        formated_running_config = {"ACL_TABLE": {str(key): value for key, value in self.tables_db_info.items()},"ACL_RULE": {str(key[0] + "|" + key[1]): value for key, value in self.rules_db_info.items()}}
+
+        print(json.dumps(formated_running_config, indent=4))
+
     def show_table(self, table_name):
         """
         Show ACL table configuration.
@@ -1088,6 +1098,16 @@ def show(ctx):
     Show ACL configuration.
     """
     pass
+
+@show.command()
+@click.pass_context
+def running_config(ctx):
+    """
+    Show ACL running configuration.
+    :return:
+    """
+    acl_loader = ctx.obj["acl_loader"]
+    acl_loader.show_running_config()
 
 
 @show.command()
