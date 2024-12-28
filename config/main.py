@@ -7283,6 +7283,21 @@ def table(table_name):
     config_db.connect()
     config_db.set_entry("ACL_TABLE", table_name, None)
 
+#
+# 'rule' subcommand ('config acl remove rule ...')
+#
+
+@remove.command()
+@click.argument("table_name", metavar="<table_name>")
+@click.argument("rule_name", metavar="<rule_name>")
+def rule(table_name, rule_name):
+    """
+    Remove ACL rule
+    """
+    log.log_info("'acl remove rule {}' executing...")
+    command = ['acl-loader', 'delete', table_name, rule_name]
+    clicommon.run_command(command)
+
 
 #
 # 'acl update' group
