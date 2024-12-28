@@ -12,6 +12,15 @@ def acl():
     pass
 
 
+# 'running-config' subcommand  ("show acl running-config")
+@acl.command()
+def running_config():
+    """Show existing ACL running-config"""
+    cmd = ['acl-loader', 'show', 'running-config']
+
+    clicommon.run_command(cmd)
+
+
 # 'rule' subcommand  ("show acl rule")
 @acl.command()
 @click.argument('table_name', required=False)
