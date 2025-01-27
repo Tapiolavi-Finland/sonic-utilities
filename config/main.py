@@ -7234,6 +7234,88 @@ def parse_acl_table_info(table_name, table_type, description, ports, stage):
     return table_info
 
 #
+# 'rule' subcommand ('config acl add rule ...')
+#
+
+@add.command()
+# Main arguments
+@click.argument('table_name', metavar="<table_name>", type=click.STRING, required=True)
+@click.argument('rule_name', metavar="<rule_name>", type=click.STRING, required=True)
+@click.argument('action', metavar='<action>', type=click.Choice(["FORWARD", "DROP", "ACCEPT", "REDIRECT", "MIRROR", "MIRROR_INGRESS", "MIRROR_EGRESS"], case_sensitive=False), required=True)
+@click.option('--action_object', metavar="[text]", help="Required only for REDIRECT action (object) or MIRROR actions (session name).", type=click.STRING, required=False)
+@click.option('--priority', type=click.INT, metavar="[num]", help="Rule priority.", required=False)
+# L2 options
+@click.option("--ip_type", type=click.STRING, metavar="[text]", help="L2 Protocol IP_TYPE field.", required=False)
+@click.option("--ether_type", type=click.STRING, metavar="[num|text|hex]", help="L2 Protocol ETHER_TYPE field.", required=False)
+# L3 options
+@click.option("--ip_protocol", type=click.STRING, metavar="[num|text]", help="L3 Protocol IP_PROTOCOL field.", required=False)
+@click.option("--src_ip", type=click.STRING, metavar="[ipv4_prefix]", help="Source IPv4 address and mask.", required=False)
+@click.option("--dst_ip", type=click.STRING, metavar="[ipv4_prefix]", help="Destination IPv4 address and mask", required=False)
+@click.option("--src_ipv6", type=click.STRING, metavar="[ipv6_prefix]", help="Source IPv6 address and mask", required=False)
+@click.option("--dst_ipv6", type=click.STRING, metavar="[ipv6_prefix]", help="Destination IPv6 address and mask", required=False)
+# L4 options
+@click.option("--src_l4_port", type=click.INT, metavar="[num]", help="Source L4 Port.", required=False)
+@click.option("--dst_l4_port", type=click.INT, metavar="[num]", help="Destination L4 port.", required=False)
+@click.option("--src_l4_port_range", type=click.STRING, metavar="[num-num]", help="Source L4 port range.", required=False)
+@click.option("--dst_l4_port_range", type=click.STRING, metavar="[num-num]", help="Destination L4 port range.", required=False)
+# Addition options
+@click.option("--icmp_code", type=click.INT, metavar="[num]", help="ICMP_CODE field", required=False)
+@click.option("--icmp_type", type=click.INT, metavar="[num]", help="ICMP_TYPE field.", required=False)
+@click.option("--icmpv6_code", type=click.INT, metavar="[num]", help="ICMPV6_CODE field.", required=False)
+@click.option("--icmpv6_type", type=click.INT, metavar="[num]", help="ICMPV6_TYPE field.", required=False)
+@click.option("--vlan_id", type=click.INT, metavar="[num]", help="VLAN ID.", required=False)
+@click.option("--src_mac", type=click.STRING, metavar="[mac_address]", help="Source MAC address field.", required=False)
+@click.option("--dst_mac", type=click.STRING, metavar="[mac_address]", help="Destination MAC address field.", required=False)
+@click.option("--in_ports", type=click.STRING, metavar="[text]", help="List of inbound ports to match value annotations. Format: Ethernet1,Ethernet2,Ethernet...", required=False)
+@click.option("--out_ports", type=click.STRING, metavar="[text]", help="list of outbound ports to match value annotations. Format: Ethernet1,Ethernet2,Ethernet...", required=False)
+@click.option("--tcp_flags", type=click.STRING, metavar="[hex/num|hex/hex]", help="TCP_FLAGS field.", required=False)
+@click.option("--dscp", type=click.INT, metavar="[num]", help="DSCP field.", required=False)
+# Functio variables
+@click.option('--skip_validation', is_flag=True, default=False, help="Skip validation.")
+@click.option('--ignore_errors', is_flag=True, default=False, help="Ignore errors.")
+@click.option('--override_rule', is_flag=True, default=False, help="Override the existing rule if the new rule matches.")
+def rule(
+    table_name, rule_name, action, action_object, priority, ip_type, ether_type, 
+    ip_protocol, src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, 
+    src_l4_port_range, dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, 
+    vlan_id, src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp,  
+    skip_validation, override_rule, ignore_errors
+    ):
+    """
+    Add ACL rule
+    """
+    log.log_info("'acl add rule {}' executing...")
+    command = ['acl-loader', 'add', table_name, rule_name, action]
+    if action_object: command += [str(action_object)]
+    if priority: command += ['--priority', str(priority)]
+    if ip_type: command += ['--ip_type', str(ip_type)]
+    if ether_type: command += ['--ether_type', str(ether_type)]
+    if ip_protocol: command += ['--ip_protocol', str(ip_protocol)]
+    if src_ip: command += ['--src_ip', str(src_ip)]
+    if dst_ip: command += ['--dst_ip', str(dst_ip)]
+    if src_ipv6:  command += ['--src_ipv6', str(src_ipv6)]
+    if dst_ipv6: command += ['--dst_ipv6', str(dst_ipv6)]
+    if src_l4_port: command += ['--src_l4_port', str(src_l4_port)]
+    if dst_l4_port: command += ['--dst_l4_port', str(dst_l4_port)]
+    if src_l4_port_range:  command += ['--src_l4_port_range', str(src_l4_port_range)]
+    if dst_l4_port_range: command += ['--dst_l4_port_range', str(dst_l4_port_range)]
+    if icmp_code: command += ['--icmp_code', str(icmp_code)]
+    if icmp_type: command += ['--icmp_type', str(icmp_type)]
+    if icmpv6_code: command += ['--icmpv6_code', str(icmpv6_code)]
+    if icmpv6_type: command += ['--icmpv6_type', str(icmpv6_type)]
+    if vlan_id: command += ['--vlan_id', str(vlan_id)]
+    if src_mac: command += ['--src_mac', str(src_mac)]
+    if dst_mac: command += ['--dst_mac', str(dst_mac)]
+    if in_ports: command += ['--in_ports', str(in_ports)]
+    if out_ports: command += ['--out_ports', str(out_ports)]
+    if tcp_flags: command += ['--tcp_flags', str(tcp_flags)]
+    if dscp: command += ['--dscp', str(dscp)]
+    if skip_validation: command += ['--skip_validation']
+    if override_rule: command += ['--override_rule']
+    if ignore_errors: command += ['--ignore_errors']
+    clicommon.run_command(command, display_cmd=False, return_cmd=False)
+
+#
 # 'table' subcommand ('config acl add table ...')
 #
 

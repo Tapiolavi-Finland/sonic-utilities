@@ -5,6 +5,8 @@ import ipaddress
 import json
 import syslog
 import operator
+import re
+import sys
 
 import openconfig_acl
 import tabulate
@@ -18,15 +20,109 @@ def info(msg):
     click.echo(click.style("Info: ", fg='cyan') + click.style(str(msg), fg='green'))
     syslog.syslog(syslog.LOG_INFO, msg)
 
+def validation_info(msg):
+    click.echo(click.style("ValidationInfo: ", fg='cyan') + click.style(str(msg), fg='yellow'))
+    syslog.syslog(syslog.LOG_INFO, msg)
 
 def warning(msg):
     click.echo(click.style("Warning: ", fg='cyan') + click.style(str(msg), fg='yellow'))
     syslog.syslog(syslog.LOG_WARNING, msg)
 
+def validation_warning(msg):
+    click.echo(click.style("ValidationWarning: ", fg='cyan') + click.style(str(msg), fg='yellow'))
+    syslog.syslog(syslog.LOG_WARNING, msg)
 
-def error(msg):
-    click.echo(click.style("Error: ", fg='cyan') + click.style(str(msg), fg='red'))
-    syslog.syslog(syslog.LOG_ERR, msg)
+def error(msg, raise_exception=False):
+    try:
+        click.echo(click.style("Error: ", fg='cyan') + click.style(str(msg), fg='red'))
+        syslog.syslog(syslog.LOG_ERR, msg)
+        if raise_exception:
+            raise Exception()
+    except:
+        sys.exit(1)
+
+def validation_error(msg, raise_exception=False):
+    try:
+        click.echo(click.style("ValidationError: ", fg='cyan') + click.style(str(msg), fg='red'))
+        syslog.syslog(syslog.LOG_ERR, msg)
+        if raise_exception:
+            raise Exception()
+    except:
+        sys.exit(1)
+
+def failure(msg, warning_only=True):
+    """
+    Handle failure by displaying a warning or error message.
+    :param msg: The message to display.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """
+    warning(msg) if warning_only else error(msg, True)
+
+def validating_failure(table_name, rule_name, e, warning_only=True):
+    """
+    Handle validation failure by displaying a warning or error message.
+    :param table_name: Name of the ACL table.
+    :param rule_name: Name of the ACL rule.
+    :param e: Error message details.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """    
+    msg = f"Table: {table_name} - Rule: {rule_name} - Details: {e}"
+    validation_warning(msg) if warning_only else validation_error(msg, True)
+
+def validating_failure_value(table_name, rule_name, key, value, e, warning_only=True):
+    """
+    Handle validation failure by displaying a warning or error message.
+    :param table_name: Name of the ACL table.
+    :param rule_name: Name of the ACL rule.
+    :param key: ACL key.
+    :param value: ACL value.
+    :param e: Error message details.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """
+    msg = f"Table: {table_name} - Rule: {rule_name} - {key}: {value} - Details: {e}"
+    validation_warning(msg) if warning_only else validation_error(msg, True)
+
+def validating_failure_key_conflict(table_name, rule_name, keys, warning_only=True):
+    """
+    Handle validation failure due to key conflict by displaying a warning or error message.
+    :param table_name: Name of the ACL table.
+    :param rule_name: Name of the ACL rule.
+    :param keys: ACL keys that are in conflict.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """
+    msg = f"Table: {table_name} - Rule: {rule_name} - Keys: {keys} - Details: Rule fields conflict"
+    validation_warning(msg) if warning_only else validation_error(msg, True)
+
+def validating_failure_value_missing(table_name, rule_name, key, warning_only=True):
+    """
+    Handle validation failure due to missing required value by displaying a warning or error message.
+    :param table_name: Name of the ACL table.
+    :param rule_name: Name of the ACL rule.
+    :param key: ACL key.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """
+    msg = f"Table: {table_name} - Rule: {rule_name} - {key}: null - Details: Missing required value"
+    validation_warning(msg) if warning_only else validation_error(msg, True)
+
+def validating_failure_value_range(table_name, rule_name, key, value, min, max, warning_only=True):
+    """
+    Handle validation failure due to value out of range by displaying a warning or error message.
+    :param table_name: Name of the ACL table.
+    :param rule_name: Name of the ACL rule.
+    :param key: ACL key.
+    :param value: ACL value.
+    :param min: Minimum valid range.
+    :param max: Maximum valid range.
+    :param warning_only: Boolean; if True, display a warning. If False, display an error with an exception.
+    :return: None
+    """
+    msg = f"Table: {table_name} - Rule: {rule_name} - {key}: {value} - Details: Value out of range, valid range is {min} to {max}"
+    validation_warning(msg) if warning_only else validation_error(msg, True)
 
 
 def deep_update(dst, src):
@@ -37,6 +133,142 @@ def deep_update(dst, src):
         else:
             dst[key] = value
     return dst
+
+def contains_lower(value):
+    """
+    Check if the value contains lowercase letters.
+    :param value: Any type of input.
+    :return: True if the value contains lowercase letters, otherwise False.
+    """
+    if re.match("^[^a-z]*$",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_h8(value):
+    """
+    Check if the value is two hexadecimal digits in 0xXX format.
+    :param value: Any type of input.
+    :return: True if the value is two hexadecimal digits in 0xXX format, otherwise False.
+    """
+    if re.match(r"\b0x[0-9a-fA-F]{2}\b",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_h16(value):
+    """
+    Check if the value is four hexadecimal digits in 0xXXXX format.
+    :param value: Any type of input.
+    :return: True if the value is four hexadecimal digits in 0xXXXX format, otherwise False.
+    """
+    if re.match(r"\b0x[0-9a-fA-F]{4}\b",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_int(value):
+    """
+    Check if the value is an integer.
+    :param value: Any type of input.
+    :return: True if the value is an integer, otherwise False.
+    """
+    if re.match("^\d+$",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_range(value):
+    """
+    Check if the value is a valid range in the format num-num.
+    :param value: String; the range to check.
+    :return: True if the value is in a valid range format, otherwise False.
+    """
+    if re.match("(\d+)-(\d+)",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_valid_ipv4_address(value):
+    """
+    Check if the value is a valid IPv4 address with a mask.
+    :param value: String; the IP address with mask in the format IP/MASK.
+    :return: True if the value is a valid IPv4 address, otherwise False.
+    """
+    if re.match("^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\/(3[0-2]|[12]?[0-9])$",str(value)):
+        return True
+    else:
+        return False
+        
+def is_value_valid_ipv6_address(value):
+    """
+    Check if the value is a valid IPv6 address with a mask.
+    :param value: String; the IP address with mask in the format IP/MASK.
+    :return: True if the value is a valid IPv6 address, otherwise False.
+    """
+    if re.match("^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}[\/](12[0-8]|1[01][0-9]|[1-9]?[0-9])$",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_valid_interface(value):
+    """
+    Check if the value is a valid Ethernet interface or a list of Ethernet interfaces.
+    :param value: String; single or multiple Ethernet interfaces.
+    :return: True if the value is a valid Ethernet interface, otherwise False.
+    """
+    if re.match(r"^\b(Ethernet\d+)(,Ethernet\d+)*\b$",str(value)):
+        return True
+    else:
+        return False
+
+def is_value_valid_mac_address(value):
+    """
+    Check if the value is a valid MAC address.
+    :param value: String; the MAC address to check.
+    :return: True if the value is a valid MAC address, otherwise False.
+    """
+    if re.match("[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}",str(value)):
+        return True
+    else:
+        return False
+
+
+class RuleField:
+    """ namespace for ACL ABNF SONiC Schema schema rule keys """
+
+    PRIORITY = "PRIORITY"
+    PACKET_ACTION = "PACKET_ACTION"
+    REDIRECT_ACTION = "REDIRECT_ACTION"
+    MIRROR_ACTION = "MIRROR_ACTION"
+    MIRROR_INGRESS_ACTION = "MIRROR_INGRESS_ACTION"
+    MIRROR_EGRESS_ACTION = "MIRROR_EGRESS_ACTION"
+    ETHER_TYPE ="ETHER_TYPE"
+    IP_TYPE = "IP_TYPE"
+    IP_PROTOCOL = "IP_PROTOCOL"
+    SRC_IP = "SRC_IP"
+    DST_IP = "DST_IP"
+    SRC_IPV6 = "SRC_IPV6"
+    DST_IPV6 = "DST_IPV6"
+    L4_DST_PORT = "L4_DST_PORT"
+    L4_SRC_PORT = "L4_SRC_PORT"
+    L4_SRC_PORT_RANGE = "L4_SRC_PORT_RANGE"
+    L4_DST_PORT_RANGE = "L4_DST_PORT_RANGE"
+    ICMP_CODE = "ICMP_CODE"
+    ICMP_TYPE = "ICMP_TYPE"
+    ICMPV6_CODE = "ICMP_CODEV6"
+    ICMPV6_TYPE = "ICMP_TYPEV6"
+    IN_PORTS = "IN_PORTS"
+    OUT_PORTS = "OUT_PORTS"
+    VLAN_ID = "VLAN_ID"
+    SRC_MAC = "SRC_MAC"
+    DST_MAC = "DST_MAC"
+    TCP_FLAGS = "TCP_FLAGS"
+    DSCP = "DSCP"
+    TC = "TC"
+    NEXT_HEADER = "NEXT_HEADER"
+    BTH_OPCODE = "BTH_OPCODE"
+    AETH_SYNDROME = "AETH_SYNDROME"
 
 
 class AclAction:
@@ -112,6 +344,21 @@ class AclLoader(object):
         "IP_ICMPV6": 58,
         "IP_L2TP": 115
     }
+
+    iptype_map = [
+        "ANY",
+        "IP",
+        "NON_IP",
+        "IPV4",
+        "IPV4ANY",
+        "NON_IPv4",
+        "IPV6",
+        "IPV6ANY",
+        "NON_IPv6",
+        "ARP",
+        "ARP_REQUEST",
+        "ARP_REPLY"
+    ]
 
     def __init__(self):
         self.yang_acl = None
@@ -704,6 +951,570 @@ class AclLoader(object):
             if ("ICMPV6_TYPE" in rule_props or "ICMPV6_CODE" in rule_props) and protocol != 58:
                 raise AclLoaderException("IP_PROTOCOL={} is not ICMPV6, but ICMPV6 fields were provided".format(protocol))
 
+
+    def validate_rule_name(self, table_name, rule_name, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema rule name.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if rule_name:
+            if not contains_lower(rule_name):
+                validating_failure(table_name, rule_name, f"The rule name contains lowercase characters", ignore_errors)
+            if (table_name, rule_name) in set(self.rules_db_info.keys()):
+                validating_failure(table_name, rule_name, f"Rule exist", True)
+            if  len({(k) for k in self.rules_info.keys() if k[0] == table_name and k[1] == rule_name}) > 1:
+                validating_failure(table_name, rule_name, f"The provided ACL rule configuration contains multiple '{table_name}|{rule_name}' rules", ignore_errors)
+        else:
+            validating_failure(table_name, "null", "Rule name is required", ignore_errors)
+
+    def validate_priority(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema PRIORITY value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: String; ACL "PRIORITY" key in ABNF format.
+        :param value: Integer; ACL priority number in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 1
+        max_value = 999999
+
+        if value:
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+            else:
+                # Check if existing acl rule configuration (self.rules_db_info) has another rule with same PRIORITY value
+                if (table_name, str(value)) in (x := {(k[0], v.get(key)) for k, v in self.rules_db_info.items() if k[0] == table_name and not k[1] == rule_name}):
+                    validating_failure_value(table_name, rule_name, key, value, f"The existing ACL rules contain a rule with the same 'PRIORITY' value on the '{table_name}' table", ignore_errors)
+                # Check if provided acl rule configuration (self.rules_info) has another rule with same PRIORITY value    
+                if (table_name, str(value)) in ({(k[0], v.get(key)) for k, v in self.rules_info.items() if k[0] == table_name and not k[1] == rule_name}):
+                    validating_failure_value(table_name, rule_name, key, value, f"The provided ACL rules contain a rule with the same 'PRIORITY' value on the '{table_name}' table", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_rule_action(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validating ACL ABNF Config DB schema rule action do not conflict in rule data and single action exist in data.
+        :param table_name: ACL Table name
+        :param rule_name: ACL Rule name
+        :param key: ACL Rule action key
+        :param value: ACL Rule action value
+        :param ignore_errors: Boolean, if True create warning, False create error with exception 
+        :return:
+        """
+
+        if value:
+            if self.validate_actions(table_name, ({key: value}), False):
+                if self.is_table_mirror(table_name):
+                    if key == AclAction.PACKET or key == AclAction.REDIRECT:
+                        validating_failure_value(table_name, rule_name, key, value, "The provided value is not valid for the mirror table", ignore_errors)
+                    elif value not in self.get_sessions_db_info():
+                        validating_failure_value(table_name, rule_name, key, value, "The specified mirror session does not exist", ignore_errors)
+
+                elif self.is_table_control_plane(table_name):
+                    if not key == AclAction.PACKET and not (value == PacketAction.ACCEPT or value == PacketAction.DROP):
+                        validating_failure_value(table_name, rule_name, key, value, "The control plane table only accepts the 'PACKET_ACTION' field and the 'DROP' and 'ACCEPT' actions.", ignore_errors)
+
+                else:
+                    if key == AclAction.MIRROR or key == AclAction.MIRROR_EGRESS or key == AclAction.MIRROR_INGRESS:
+                        validating_failure_value(table_name, rule_name, key, value, "This value is not allowed for non-mirror tables", ignore_errors)
+                    if key == AclAction.REDIRECT:
+                        if not re.match(r"\b(Ethernet\d+|PortChannel\d+|\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?(,\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?)?|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(@(Ethernet\d+|Vrf[\w-]+))?)\b",str(value)):
+                            validating_failure_value(table_name, rule_name, key, value, "Invalid Value", ignore_errors)
+            else: 
+                validating_failure(table_name, rule_name,f"The switch does not support the '{key}' action", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_ip_protocol(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validating ACL ABNF Config DB schema IP_PROTOCOL.
+        :param table_name: ACL Table name
+        :param rule_name: ACL Rule name
+        :param key: ACL key in ABNF format
+        :param value: ACL IP_PROTOCOL value in ABNF format     
+        :param ignore_errors: Boolean, if True create warning, False create error with exception 
+        :return:  
+        """
+        values = self.rules_info[table_name, rule_name]
+
+        if value:
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif not value in self.ip_protocol_map.values():
+                validating_failure_value(table_name, rule_name, key, value, "The provided IP_PROTOCOL is not valid", ignore_errors)
+            elif RuleField.TCP_FLAGS in values and value != 6:
+                validating_failure_value(table_name, rule_name,key, value,  "IP_PROTOCOL value is not TCP, but TCP flags were provided", ignore_errors)
+            elif (RuleField.ICMP_TYPE in values or RuleField.ICMP_CODE in values) and value != 1:
+                validating_failure_value(table_name, rule_name, key, value, "IP_PROTOCOL value is not ICMP, but ICMP fields were provided", ignore_errors)
+            elif (RuleField.ICMPV6_TYPE in values or RuleField.ICMPV6_CODE in values) and value != 58:
+                validating_failure_value(table_name, rule_name, key, value, "IP_PROTOCOL value is not ICMPV6, but ICMPV6 fields were provided", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_ip_type(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema rule action.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL rule action key.
+        :param value: ACL rule action value.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if not value in self.iptype_map:
+                validating_failure_value(table_name, rule_name, key, value, "The provided IP_TYPE is not valid", ignore_errors) 
+            elif self.is_table_l3v6(table_name) and  value == self.iptype_map["IPV4"] or value == self.iptype_map["IPV4ANY"] or value == self.iptype_map["NON_IPv6"]:
+                validating_failure_value(table_name, rule_name, key, value, "Invalid value for IPv6 table", ignore_errors)
+            elif self.is_table_l3(table_name) and value == self.iptype_map["IPV6"] or value == self.iptype_map["IPV6ANY"] or value == self.iptype_map["NON_IPv4"]:
+                validating_failure_value(table_name, rule_name, key, value, "The provided parameter is not valid for the IPv4 table", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_ether_type(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema IPv4 address and mask.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL IPv4 address and mask in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if is_value_int(value):
+                if not int(value) in self.ethertype_map.values():
+                    validating_failure_value(table_name, rule_name, key, value, "The provided ETHER_TYPE is not valid", ignore_errors)
+                elif self.is_table_l3v6(table_name):
+                    validating_failure_value(table_name, rule_name, key, value, "ETHER_TYPE is not supported for DATAACLV6. Use the IP_TYPE rule parameter for IPv6 tables", ignore_errors)
+                elif self.is_table_l3(table_name) and value == self.ethertype_map["ETHERTYPE_IPV6"]:
+                    validating_failure_value(table_name, rule_name, key, value, "The provided parameter is not valid for the IPv4 table", ignore_errors) 
+            else:
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_ipv4(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema IPv4 address and mask.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL IPv4 address and mask in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if self.is_table_l3v6(table_name):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not supported by the IPv6 table", ignore_errors)
+            elif not is_value_valid_ipv4_address(value):
+                validating_failure_value(table_name, rule_name, key, value, "Invalid IPv4 Address or Mask", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_ipv6(self, table_name, rule_name, key, value,ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema IPv6 address and mask.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "SRC_IPV6" key in ABNF format.
+        :param value: ACL IPv6 address and mask in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if self.is_table_l3(table_name):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not supported by the IPv4 table", ignore_errors)     
+            elif not is_value_valid_ipv6_address(value):
+                validating_failure_value(table_name, rule_name, key, value, "Invalid IPv6 Address or Mask", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_l4_port(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema port number value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "L4_SRC_PORT" key in ABNF format.
+        :param value: ACL L4 port number in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 1
+        max_value = 65535
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_l4_port_range(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema port range value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "L4_SRC_PORT_RANGE" key in ABNF format.
+        :param value: ACL L4 port range in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 1
+        max_value = 65535
+
+        if value: 
+            if not is_value_range(value): 
+                validating_failure_value(table_name, rule_name, key, value, "The value must be in the format: [start port number]-[end port number]", ignore_errors)
+            elif int(value.split('-')[0]) < min_value or int(value.split('-')[0]) > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+            elif int(value.split('-')[1]) < min_value or int(value.split('-')[1]) > max_value:
+                validating_failure_value_range(table_name, rule_name,key, value,  min_value, max_value, ignore_errors)
+            elif int(value.split('-')[0]) > int(value.split('-')[1]):
+                validating_failure_value(table_name, rule_name, key, value, "The value must be in the format: [start port number]-[end port number]", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_icmp_type(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema IPv4/IPv6 ICMP type value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL ICMP code or type number.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 0
+        max_value = 255
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_icmp_code(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema IPv4/IPv6 ICMP code value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL ICMP code or type number.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 0
+        max_value = 255
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_vlan_id(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema VLAN ID value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "VLAN_ID" key in ABNF format.
+        :param value: ACL VLAN ID number in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 1
+        max_value = 4096
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_mac(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema MAC address value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL MAC address in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if not is_value_valid_mac_address(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not a valid MAC address", ignore_errors)
+            elif not RuleField.PACKET_ACTION in self.rules_info[table_name, rule_name]:
+                validating_failure_value(table_name, rule_name, key, value, "Only PACKET_ACTION actions are supported for this value", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_interface_ports(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema interface port names value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL key in ABNF format.
+        :param value: ACL interface port names in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if not is_value_valid_interface(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not valid", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_tcp_flags(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema TCP flags value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "TCP_FLAGS" key in ABNF format.
+        :param value: Two hexadecimal digits and mask or two hexadecimal digits, format 0x00/0x00 or 0x00/63.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        if value: 
+            if not re.match(r"\b(0x([0-9a-fA-F]{2})[\/]0x\2|0x[0-9a-fA-F]{2}[\/]\d{2,3}|\d{1,3}[\/]\d{1,3})\b", str(value)):
+                validating_failure_value(table_name, rule_name, key, value, "The value must be in the format of two hexadecimal digits followed by a mask, or two sets of hexadecimal digits. Example: 0x00/0x00 or 0x00/63", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    def validate_dscp(self, table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema DSCP value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "DSCP" key in ABNF format.
+        :param value: ACL DSCP in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        min_value = 0
+        max_value = 63
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+            elif value < min_value or value > max_value:
+                validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
+            elif not self.is_table_mirror(table_name):
+                validating_failure_value(table_name, rule_name, key, value, "This value is not allowed for non-mirror tables", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_tc(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema TC value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "TC" key in ABNF format.
+        :param value: ACL TC in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        validation_info(f"Table: {table_name} - Rule: {rule_name} - {key}: {value} - Details: Validation for this parameter and value is not fully supported")
+
+        if value: 
+            if not is_value_int(value):
+                validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_bth_opcode(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema BTH opcode value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "BTH_OPCODE" key in ABNF format.
+        :param value: '0x' + two hexadecimal digits; BTH opcode in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        validation_info(f"Table: {table_name} - Rule: {rule_name} - {key}: {value} - Details: Validation for this parameter and value is not fully supported")
+
+        if value: 
+            if not is_value_h8(value):
+                validating_failure_value(table_name, rule_name, key, value, "The value must be in the '0x' format followed by two hexadecimal digits", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_aeth_syndrome(table_name, rule_name, key, value, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema AETH syndrome value.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param key: ACL "AETH_SYNDROME" key in ABNF format.
+        :param value: '0x' + two hexadecimal digits; AETH syndrome in ABNF format.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        validation_info(f"Table: {table_name} - Rule: {rule_name} - {key}: {value} - Details: Validation for this parameter and value is not fully supported")
+
+        if value: 
+            if not is_value_h8(value):
+                validating_failure_value(table_name, rule_name, key, value, "The value must be in the '0x' format followed by two hexadecimal digits", ignore_errors)
+        else:
+            validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
+
+    @staticmethod
+    def validate_rule_field_keys(table_name, rule_name, keys, rule_props, ignore_errors):
+        """
+        Validate ACL ABNF Config DB schema rule field key.
+        :param table_name: Name of the ACL table.
+        :param rule_name: Name of the ACL rule.
+        :param keys: Tuple; ACL rules keys to validate.
+        :param rule_props: List; ACL rules data.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: If the key is valid, return a single valid rule field key.
+        """
+        if not isinstance(keys, tuple):  
+            raise AclLoaderException("The provided variable 'keys' is not of type tuple: %s" %(str(keys))) 
+        elif set((keys)) <= rule_props.keys():
+            validating_failure_key_conflict(table_name, rule_name, keys, ignore_errors)
+        else:
+            for key in keys:
+                if key in rule_props:
+                    return key
+
+    def validate_rules_info(self, ignore_errors=False):
+        """
+        Validate ACL ABNF Config DB schema parameters fields and values.
+        :param ignore_errors: Boolean; if True, create a warning. If False, create an error with an exception.
+        :return: None
+        """
+        for (table_name, rule_name), values in self.rules_info.items():
+
+            if table_name and self.tables_db_info.get(table_name):
+                if not contains_lower(table_name):
+                    validating_failure(table_name, rule_name, f" Table name '{table_name}' contains lowercase characters", ignore_errors)
+
+                self.validate_rule_name(table_name, rule_name, ignore_errors)
+                if values:
+                    # PRIORITY
+                    if RuleField.PRIORITY in values:
+                        self.validate_priority(table_name, rule_name, RuleField.PRIORITY, values[RuleField.PRIORITY], ignore_errors)
+                    else:
+                        validating_failure(table_name, rule_name, f"Required field missing {RuleField.PRIORITY}", ignore_errors)  
+
+                    # ACTION
+                    if (action := self.validate_rule_field_keys(table_name, rule_name, (RuleField.PACKET_ACTION, RuleField.REDIRECT_ACTION, RuleField.MIRROR_ACTION, RuleField.MIRROR_EGRESS_ACTION, RuleField.MIRROR_INGRESS_ACTION), values, ignore_errors)):
+                        self.validate_rule_action(table_name, rule_name, action, values[action], ignore_errors)
+                    else:
+                        validating_failure(table_name, rule_name, f"Required action missing", ignore_errors)  
+
+                    # L2 Protocol = ETHER_TYPE / IP_TYPE
+                    if (l2_protocol := self.validate_rule_field_keys(table_name, rule_name, (RuleField.ETHER_TYPE, RuleField.IP_TYPE), values, ignore_errors)):
+                        if RuleField.ETHER_TYPE == l2_protocol:
+                            self.validate_ether_type(table_name, rule_name, l2_protocol, values[l2_protocol], ignore_errors)
+                        elif RuleField.IP_TYPE == l2_protocol:
+                            self.validate_ip_type(table_name, rule_name, l2_protocol, values[l2_protocol], ignore_errors)
+
+                    # L3 Protocol = IP_PROTOCOL / NEXT_HEADER
+                    if (l3_protocol := self.validate_rule_field_keys(table_name, rule_name, (RuleField.IP_PROTOCOL, RuleField.NEXT_HEADER), values, ignore_errors)):
+                        self.validate_ip_protocol(table_name, rule_name, l3_protocol, values[l3_protocol], ignore_errors)
+
+                    # SRC_IP / SRC_IPV6
+                    if (src_ip := self.validate_rule_field_keys(table_name, rule_name, (RuleField.SRC_IP, RuleField.SRC_IPV6), values, ignore_errors)):
+                        if RuleField.SRC_IP == src_ip:
+                            self.validate_ipv4(table_name, rule_name, src_ip, values[src_ip], ignore_errors)
+                        elif RuleField.SRC_IPV6 == src_ip:
+                            self.validate_ipv6(table_name, rule_name, src_ip, values[src_ip], ignore_errors)
+
+                    # DST_IP / DST_IPV6
+                    if (dst_ip := self.validate_rule_field_keys(table_name, rule_name, (RuleField.DST_IP, RuleField.DST_IPV6), values, ignore_errors)):
+                        if RuleField.DST_IP == dst_ip:
+                            self.validate_ipv4(table_name, rule_name, dst_ip, values[dst_ip], ignore_errors)
+                        elif RuleField.DST_IPV6 == dst_ip:
+                            self.validate_ipv6(table_name, rule_name, dst_ip, values[dst_ip], ignore_errors)
+
+                    # L4_SRC_PORT / L4_SRC_PORT_RANGE
+                    if (l4_src_port := self.validate_rule_field_keys(table_name, rule_name, (RuleField.L4_SRC_PORT, RuleField.L4_SRC_PORT_RANGE), values, ignore_errors)):
+                        if RuleField.L4_SRC_PORT == l4_src_port:
+                            self.validate_l4_port(table_name, rule_name, l4_src_port, values[l4_src_port], ignore_errors)
+                        elif RuleField.L4_SRC_PORT == l4_src_port:
+                            self.validate_l4_port_range(table_name, rule_name, l4_src_port, values[l4_src_port], ignore_errors)
+
+                    # L4_DST_PORT / L4_DST_PORT_RANGE
+                    if (l4_dst_port := self.validate_rule_field_keys(table_name, rule_name, (RuleField.L4_DST_PORT, RuleField.L4_DST_PORT_RANGE), values, ignore_errors)):
+                        if RuleField.L4_DST_PORT == l4_dst_port:
+                            self.validate_l4_port(table_name, rule_name, l4_dst_port, values[l4_dst_port], ignore_errors)
+                        elif RuleField.L4_DST_PORT == l4_dst_port:
+                            self.validate_l4_port_range(table_name, rule_name, RuleField.L4_DST_PORT_RANGE, values[RuleField.L4_DST_PORT_RANGE], ignore_errors)    
+
+                    # ICMP_TYPE / ICMPV6_TYPE
+                    if (icmp_type := self.validate_rule_field_keys(table_name, rule_name, (RuleField.ICMP_TYPE, RuleField.ICMPV6_TYPE), values, ignore_errors)):
+                        self.validate_icmp_type(table_name, rule_name, icmp_type, values[icmp_type], ignore_errors)
+
+                    # ICMP_CODE / ICMPV6_CODE
+                    if (icmp_code := self.validate_rule_field_keys(table_name, rule_name, (RuleField.ICMP_CODE, RuleField.ICMPV6_CODE), values, ignore_errors)):
+                        self.validate_icmp_code(table_name, rule_name, icmp_code, values[icmp_code], ignore_errors)
+
+                    if RuleField.VLAN_ID in values:
+                        self.validate_vlan_id(table_name, rule_name, RuleField.VLAN_ID, values[RuleField.VLAN_ID], ignore_errors)
+
+                    if RuleField.SRC_MAC in values:
+                        self.validate_mac(table_name, rule_name, RuleField.SRC_MAC, values[RuleField.SRC_MAC], ignore_errors)
+
+                    if RuleField.DST_MAC in values:
+                        self.validate_mac(table_name, rule_name, RuleField.DST_MAC, values[RuleField.DST_MAC], ignore_errors)
+
+                    if RuleField.IN_PORTS in values:
+                        self.validate_interface_ports(table_name, rule_name, RuleField.IN_PORTS, values[RuleField.IN_PORTS], ignore_errors)
+
+                    if RuleField.OUT_PORTS in values:
+                        self.validate_interface_ports(table_name, rule_name, RuleField.OUT_PORTS, values[RuleField.OUT_PORTS], ignore_errors)
+
+                    if RuleField.TCP_FLAGS in values:
+                        self.validate_tcp_flags(table_name, rule_name, RuleField.TCP_FLAGS, values[RuleField.TCP_FLAGS], ignore_errors)
+
+                    if RuleField.DSCP in values:
+                        self.validate_dscp(table_name, rule_name, RuleField.DSCP, values[RuleField.DSCP], ignore_errors)
+
+                    if RuleField.TC in values:
+                        self.validate_tc(table_name, rule_name, RuleField.TC, values[RuleField.TC], ignore_errors)
+
+                    if RuleField.BTH_OPCODE in values:
+                        self.validate_bth_opcode(table_name, rule_name, RuleField.BTH_OPCODE, values[RuleField.BTH_OPCODE], ignore_errors)
+
+                    if RuleField.AETH_SYNDROME in values:
+                        self.validate_aeth_syndrome(table_name, rule_name, RuleField.AETH_SYNDROME, values[RuleField.AETH_SYNDROME], ignore_errors)
+
+                    # Check do unknow rule parameters exist in rule
+                    for key, value in values.items():
+                        if not key in vars(RuleField).values():
+                            validating_failure_value(table_name, rule_name, key, value, "Unknown rule field", ignore_errors)
+                else:
+                    validating_failure(table_name, rule_name,"The provided rule configuration is incorrect", ignore_errors)
+            else:
+                validating_failure( table_name, rule_name, "Cannot validate rule without a valid table", ignore_errors)
+
     def convert_rule_to_db_schema(self, table_name, rule, skip_action_validation=False):
         """
         Convert rules format from openconfig ACL to Config DB schema
@@ -792,6 +1603,23 @@ class AclLoader(object):
 
             if not self.is_table_egress(table_name):
                 deep_update(self.rules_info, self.deny_rule(table_name))
+
+    def combine_rules(self, override_rules=False):
+        """
+        Add existing rules to new rule table.
+        """
+        temp_rules_db_info = self.rules_db_info.copy()
+        try:
+            for (table_name, rule_name) in self.rules_info.copy():
+                if (table_name, rule_name) in temp_rules_db_info:
+                    if override_rules:
+                        del temp_rules_db_info[table_name, rule_name]
+                    else:
+                        error(f"Table: {table_name} - Rule: {rule_name} - Rule not created. The rule already exists. Delete the existing rule or use the override option")
+                        del self.rules_info[table_name, rule_name]
+            self.rules_info.update(temp_rules_db_info)
+        except AclLoaderException as ex:
+            error("Error combining rules. Operation skipped." % ex)
 
     def full_update(self):
         """
@@ -902,15 +1730,150 @@ class AclLoader(object):
                     # Program for per-asic namespace corresponding to front asic also if present.
                     for namespace_configdb in self.per_npu_configdb.values():
                         namespace_configdb.set_entry(self.ACL_RULE, key, None)
+                        
+    def convert_action(self, action, action_object, ignore_errors):
+        rule_props = {}
+        if action:
+            if PacketAction.FORWARD == str(action).upper():
+                rule_props[RuleField.PACKET_ACTION] = PacketAction.FORWARD
+            elif PacketAction.DROP == str(action).upper():
+                rule_props[RuleField.PACKET_ACTION] = PacketAction.DROP
+            elif PacketAction.ACCEPT == str(action).upper():
+                rule_props[RuleField.PACKET_ACTION] = PacketAction.ACCEPT
+            elif "REDIRECT" == str(action).upper():
+                if action_object:
+                    rule_props[RuleField.REDIRECT_ACTION] = action_object
+                else:
+                    failure(f"{RuleField.REDIRECT_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
+            elif "MIRROR" == str(action).upper():
+                if action_object:
+                    rule_props[RuleField.MIRROR_ACTION] = action_object
+                else:
+                    failure(f"{RuleField.MIRROR_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
+            elif "MIRROR_INGRESS" == str(action).upper():
+                if action_object:
+                    rule_props[RuleField.MIRROR_INGRESS_ACTION] = action_object
+                else:
+                    failure(f"{RuleField.MIRROR_INGRESS_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
+            elif "MIRROR_EGRESS" == str(action).upper():
+                if action_object:
+                    rule_props[RuleField.MIRROR_EGRESS_ACTION] = action_object
+                else:
+                    failure(f"{RuleField.MIRROR_EGRESS_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
+            else:
+                failure(f"ACTION: {str(action).upper()} - Details: The action is invalid", ignore_errors)
+        return rule_props
+
+    def convert_ether_type(self, ether_type, ignore_errors):
+        if ether_type:
+            if str(ether_type).upper() in self.ethertype_map.keys():
+                return self.ethertype_map[str(ether_type).upper()]
+            elif is_value_h16(str(ether_type).lower()):
+                if int(ether_type, 16) in self.ethertype_map.values():
+                    return  int(str(ether_type).lower(),16)
+                else:
+                    failure(f"{RuleField.ETHER_TYPE}: {ether_type} - Details: Mapping failed due to an invalid value", ignore_errors)
+            elif is_value_int(ether_type):
+                return int(ether_type)
+            else:
+                failure(f"{RuleField.ETHER_TYPE}: {ether_type} - Details: Mapping failed due to an invalid value", ignore_errors)
+
+    def convert_ip_protocol(self, ip_protocol, ignore_errors):
+        if ip_protocol:
+            if str(ip_protocol).upper() in self.ip_protocol_map:
+                return self.ip_protocol_map[str(ip_protocol).upper()]
+            elif is_value_int(ip_protocol):
+                return int(ip_protocol)
+            else:
+                failure(f"{RuleField.IP_PROTOCOL}: {ip_protocol} - Details: Mapping failed due to an invalid value", ignore_errors)
+
+
+    def load_rule(
+        self, rule_name, action, action_object, priority, ip_type, ether_type, ip_protocol, 
+        src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, src_l4_port_range, 
+        dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, vlan_id, 
+        src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp, ignore_errors=False
+        ):
+        """
+        Maping rule data
+        :param rule_name:
+        :param priority:
+        :param action:
+        :param action_object:
+        :param ip_type:
+        :param ether_type:
+        :param ether_type:
+        :param ip_protocol:
+        :param src_ip:
+        :param dst_ip:
+        :param src_ipv6:
+        :param dst_ipv6:
+        :param src_l4_port:
+        :param dst_l4_port:
+        :param src_l4_port_range:
+        :param dst_l4_port_range:
+        :param icmp_code:
+        :param icmp_type:
+        :param icmpv6_code:
+        :param icmpv6_typ:
+        :param vlan_id:
+        :param src_mac:
+        :param dst_mac:
+        :param in_ports:
+        :param out_ports:
+        :param tcp_flags:
+        :param dscp:
+        :param ignore_errors:
+        :return:
+        """
+        rule_props = {}
+        rule_data = {(self.current_table, rule_name.upper()): rule_props}
+
+        fields = {
+            RuleField.PRIORITY: priority,
+            RuleField.ETHER_TYPE: self.convert_ether_type(ether_type, ignore_errors),
+            RuleField.IP_TYPE: ip_type,
+            RuleField.IP_PROTOCOL: self.convert_ip_protocol(ip_protocol, ignore_errors),
+            RuleField.SRC_IP: src_ip,
+            RuleField.DST_IP: dst_ip,
+            RuleField.SRC_IPV6: src_ipv6,
+            RuleField.DST_IPV6: dst_ipv6,
+            RuleField.L4_DST_PORT: dst_l4_port,
+            RuleField.L4_SRC_PORT: src_l4_port,
+            RuleField.L4_SRC_PORT_RANGE: src_l4_port_range,
+            RuleField.L4_DST_PORT_RANGE: dst_l4_port_range,
+            RuleField.ICMP_CODE: icmp_code,
+            RuleField.ICMP_TYPE: icmp_type,
+            RuleField.ICMPV6_CODE: icmpv6_code,
+            RuleField.ICMPV6_TYPE: icmpv6_type,
+            RuleField.IN_PORTS: in_ports,
+            RuleField.OUT_PORTS: out_ports,
+            RuleField.VLAN_ID: vlan_id,
+            RuleField.SRC_MAC: src_mac,
+            RuleField.DST_MAC: dst_mac,
+            RuleField.TCP_FLAGS: tcp_flags,
+            RuleField.DSCP: dscp,
+        }
+        #Convert and add action to fields dict
+        fields.update(self.convert_action(action, action_object, ignore_errors))
+
+        # Field Mapping
+        for field, value in fields.items():
+            if value:
+                rule_props[field] = value
+
+        # Update rule data
+        try:
+            deep_update(self.rules_info, rule_data)
+        except AclLoaderException as ex:
+            error("Error processing rule %s: %s. Skipped." % ((self.current_table, rule_name.upper()), ex))
 
     def show_running_config(self):
         """
         Show ACL running configuration.
         :return:
         """
-        #formated_running_config = {"ACL_TABLE": {str(key): value for key, value in self.tables_db_info.items()},"ACL_RULE": {str(key).replace(", ", "|").replace("'", "").replace("(", "").replace(")", ""): value for key, value in self.rules_db_info.items()}}
         formated_running_config = {"ACL_TABLE": {str(key): value for key, value in self.tables_db_info.items()},"ACL_RULE": {str(key[0] + "|" + key[1]): value for key, value in self.rules_db_info.items()}}
-
         print(json.dumps(formated_running_config, indent=4))
 
     def show_table(self, table_name):
@@ -1233,6 +2196,77 @@ def delete(ctx, table, rule):
     acl_loader = ctx.obj["acl_loader"]
 
     acl_loader.delete(table, rule)
+
+
+@cli.command()
+# Main arguments
+@click.argument('table_name', type=click.STRING, required=True)
+@click.argument('rule_name', type=click.STRING, required=True)
+@click.argument('action', type=click.Choice(["FORWARD", "DROP", "ACCEPT", "REDIRECT", "MIRROR", "MIRROR_INGRESS", "MIRROR_EGRESS"], case_sensitive=False), metavar='ACTION', required=True)
+@click.option('--action_object', metavar="[text]", help="Required only for REDIRECT action (object) or MIRROR actions (session name).", type=click.STRING, required=False)
+@click.option('--priority', type=click.INT, metavar="[num]", help="Rule priority.", required=False)
+# L2 options
+@click.option("--ip_type", type=click.STRING, metavar="[text]", help="L2 Protocol IP_TYPE field.", required=False)
+@click.option("--ether_type", type=click.STRING, metavar="[num|text|hex]", help="L2 Protocol ETHER_TYPE field.", required=False)
+# L3 options
+@click.option("--ip_protocol", type=click.STRING, metavar="[num|text]", help="L3 Protocol IP_PROTOCOL field.", required=False)
+@click.option("--src_ip", type=click.STRING, metavar="[ipv4_prefix]", help="Source IPv4 address and mask.", required=False)
+@click.option("--dst_ip", type=click.STRING, metavar="[ipv4_prefix]", help="Destination IPv4 address and mask", required=False)
+@click.option("--src_ipv6", type=click.STRING, metavar="[ipv6_prefix]", help="Source IPv6 address and mask", required=False)
+@click.option("--dst_ipv6", type=click.STRING, metavar="[ipv6_prefix]", help="Destination IPv6 address and mask", required=False)
+# L4 options
+@click.option("--src_l4_port", type=click.INT, metavar="[num]", help="Source L4 Port.", required=False)
+@click.option("--dst_l4_port", type=click.INT, metavar="[num]", help="Destination L4 port.", required=False)
+@click.option("--src_l4_port_range", type=click.STRING, metavar="[num-num]", help="Source L4 port range.", required=False)
+@click.option("--dst_l4_port_range", type=click.STRING, metavar="[num-num]", help="Destination L4 port range.", required=False)
+# Addition options
+@click.option("--icmp_code", type=click.INT, metavar="[num]", help="ICMP_CODE field", required=False)
+@click.option("--icmp_type", type=click.INT, metavar="[num]", help="ICMP_TYPE field.", required=False)
+@click.option("--icmpv6_code", type=click.INT, metavar="[num]", help="ICMPV6_CODE field.", required=False)
+@click.option("--icmpv6_type", type=click.INT, metavar="[num]", help="ICMPV6_TYPE field.", required=False)
+@click.option("--vlan_id", type=click.INT, metavar="[num]", help="VLAN ID.", required=False)
+@click.option("--src_mac", type=click.STRING, metavar="[mac_address]", help="Source MAC address field.", required=False)
+@click.option("--dst_mac", type=click.STRING, metavar="[mac_address]", help="Destination MAC address field.", required=False)
+@click.option("--in_ports", type=click.STRING, metavar="[text]", help="List of inbound ports to match value annotations. Format: Ethernet1,Ethernet2,Ethernet...", required=False)
+@click.option("--out_ports", type=click.STRING, metavar="[text]", help="list of outbound ports to match value annotations. Format: Ethernet1,Ethernet2,Ethernet...", required=False)
+@click.option("--tcp_flags", type=click.STRING, metavar="[hex/num|hex/hex]", help="TCP_FLAGS field.", required=False)
+@click.option("--dscp", type=click.INT, metavar="[num]", help="DSCP field.", required=False)
+# Functio variables
+@click.option('--skip_validation', is_flag=True, default=False, help="Skip validation.")
+@click.option('--ignore_errors', is_flag=True, default=False, help="Ignore errors.")
+@click.option('--override_rule', is_flag=True, default=False, help="Override the existing rule if the new rule matches.")
+@click.pass_context
+def add(
+    ctx, table_name, rule_name, action, action_object, priority, ip_type, ether_type, 
+    ip_protocol, src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, 
+    src_l4_port_range, dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, 
+    vlan_id, src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp,  
+    skip_validation, override_rule, ignore_errors
+    ):
+    """
+    Add ACL rule.
+    """
+    if (action == "redirect" or action == "mirror" or action == "mirror_ingress" or action == "mirror_egress" or action == "REDIRECT" or action == "MIRROR" or action == "MIRROR_INGRESS" or action == "MIRROR_EGRESS") and not action_object:
+        raise click.UsageError('Error: Missing option "--action_object". This option is required for actions: [REDIRECT, DO_NOT_NAT, MIRROR, MIRROR_INGRESS, MIRROR_EGRESS].')
+
+    if not priority:
+        raise click.UsageError('Error: Missing option "--priority".')
+
+    acl_loader = ctx.obj["acl_loader"]
+    acl_loader.set_table_name(table_name.upper())
+
+    acl_loader.load_rule(
+        rule_name, action, action_object, priority, ip_type, ether_type, ip_protocol,
+        src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, src_l4_port_range,
+        dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, vlan_id,
+        src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp, ignore_errors
+    )
+
+    if not skip_validation:
+        acl_loader.validate_rules_info(ignore_errors)
+
+    acl_loader.combine_rules(override_rule)
+    acl_loader.full_update()
 
 
 if __name__ == "__main__":
