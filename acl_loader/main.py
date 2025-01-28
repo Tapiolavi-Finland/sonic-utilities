@@ -649,6 +649,60 @@ class AclLoader(object):
         """
         return self.tables_db_info[tname]['type'].upper() == self.ACL_TABLE_TYPE_CTRLPLANE
 
+    def is_action_valid(self, table_name, action_key, action_value):
+        """
+        Validate if the given action is valid for the specified table and switch capability.
+        Parameters:
+        table_name: String, The name of the table to validate the action against.
+        action_key: String, The key of the action to validate.
+        action_value: String, The value of the action to validate.
+        Returns: Bool: True if the action is valid, False otherwise.
+        Raises: AclLoaderException: If the specified table does not exist.
+        """
+        if self.is_table_control_plane(table_name):
+            return True
+
+        if table_name not in self.tables_db_info:
+            raise AclLoaderException("Table {} does not exist".format(table_name))
+
+        stage = self.tables_db_info[table_name].get("stage", Stage.INGRESS)
+
+        # check if per npu state db is there then read using first state db
+        # else read from global statedb
+        if self.per_npu_statedb:
+            # For multi-npu we will read using anyone statedb connector for front asic namespace.
+            # Same information should be there in all state DB's
+            # as it is static information about switch capability
+            namespace_statedb = list(self.per_npu_statedb.values())[0]
+            aclcapability = namespace_statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(self.ACL_STAGE_CAPABILITY_TABLE, stage.upper()))
+            switchcapability = namespace_statedb.get_all(self.statedb.STATE_DB, "{}|switch".format(self.SWITCH_CAPABILITY_TABLE))
+        else:
+            aclcapability = self.statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(self.ACL_STAGE_CAPABILITY_TABLE, stage.upper()))
+            switchcapability = self.statedb.get_all(self.statedb.STATE_DB, "{}|switch".format(self.SWITCH_CAPABILITY_TABLE))
+        # In the load_minigraph path, it's possible that the STATE_DB entry haven't pop up because orchagent is stopped
+        # before loading acl.json. So we skip the validation if any table is empty
+        if (not aclcapability or not switchcapability):
+            warning("Skipped action validation as capability table is not present in STATE_DB")
+            return True
+
+        action_is_valid = True
+        action_list_key = self.ACL_ACTIONS_CAPABILITY_FIELD
+
+        values = aclcapability[action_list_key].split(",")
+        if action_key.upper() not in values:
+            action_is_valid = False
+
+        if action_key == AclAction.PACKET:
+            # Check if action_value is supported
+            key = "{}|{}".format(self.ACL_ACTION_CAPABILITY_FIELD, action_key.upper())
+            if key not in switchcapability:
+                action_is_valid = False
+
+            if action_value not in switchcapability[key]:
+                action_is_valid = False
+
+        return action_is_valid
+
     @staticmethod
     def parse_acl_json(filename):
         yang_acl = pybindJSON.load(filename, openconfig_acl, "openconfig_acl")
@@ -1008,27 +1062,27 @@ class AclLoader(object):
         :param ignore_errors: Boolean, if True create warning, False create error with exception 
         :return:
         """
-
         if value:
-            if self.validate_actions(table_name, ({key: value}), False):
-                if self.is_table_mirror(table_name):
-                    if key == AclAction.PACKET or key == AclAction.REDIRECT:
-                        validating_failure_value(table_name, rule_name, key, value, "The provided value is not valid for the mirror table", ignore_errors)
-                    elif value not in self.get_sessions_db_info():
-                        validating_failure_value(table_name, rule_name, key, value, "The specified mirror session does not exist", ignore_errors)
+            if self.is_table_control_plane(table_name):
+                if not key == AclAction.PACKET and not (value == PacketAction.ACCEPT or value == PacketAction.DROP):
+                    validating_failure_value(table_name, rule_name, key, value, "The control plane table only accepts the 'PACKET_ACTION' field and the 'DROP' and 'ACCEPT' actions.", ignore_errors)
 
-                elif self.is_table_control_plane(table_name):
-                    if not key == AclAction.PACKET and not (value == PacketAction.ACCEPT or value == PacketAction.DROP):
-                        validating_failure_value(table_name, rule_name, key, value, "The control plane table only accepts the 'PACKET_ACTION' field and the 'DROP' and 'ACCEPT' actions.", ignore_errors)
+            else:
+                if self.is_action_valid(table_name, key, value):
+                        if self.is_table_mirror(table_name):
+                            if key == AclAction.PACKET or key == AclAction.REDIRECT:
+                                validating_failure_value(table_name, rule_name, key, value, "The provided value is not valid for the mirror table", ignore_errors)
+                            elif value not in self.get_sessions_db_info():
+                                validating_failure_value(table_name, rule_name, key, value, "The specified mirror session does not exist", ignore_errors)
 
-                else:
-                    if key == AclAction.MIRROR or key == AclAction.MIRROR_EGRESS or key == AclAction.MIRROR_INGRESS:
-                        validating_failure_value(table_name, rule_name, key, value, "This value is not allowed for non-mirror tables", ignore_errors)
-                    if key == AclAction.REDIRECT:
-                        if not re.match(r"\b(Ethernet\d+|PortChannel\d+|\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?(,\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?)?|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(@(Ethernet\d+|Vrf[\w-]+))?)\b",str(value)):
-                            validating_failure_value(table_name, rule_name, key, value, "Invalid Value", ignore_errors)
-            else: 
-                validating_failure(table_name, rule_name,f"The switch does not support the '{key}' action", ignore_errors)
+                        else:
+                            if key == AclAction.MIRROR or key == AclAction.MIRROR_EGRESS or key == AclAction.MIRROR_INGRESS:
+                                validating_failure_value(table_name, rule_name, key, value, "This value is not allowed for non-mirror tables", ignore_errors)
+                            elif key == AclAction.REDIRECT:
+                                if not re.match(r"\b(Ethernet\d+|PortChannel\d+|\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?(,\d{1,3}(\.\d{1,3}){3}(@(Ethernet\d+|Vrf[\w-]+))?)?|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(@(Ethernet\d+|Vrf[\w-]+))?)\b",str(value)):
+                                    validating_failure_value(table_name, rule_name, key, value, "Invalid Value", ignore_errors)
+                else: 
+                    validating_failure(table_name, rule_name,f"The '{key}': '{value}' action is unsupported", ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
 
@@ -1731,7 +1785,7 @@ class AclLoader(object):
                     for namespace_configdb in self.per_npu_configdb.values():
                         namespace_configdb.set_entry(self.ACL_RULE, key, None)
                         
-    def convert_action(self, action, action_object, ignore_errors):
+    def map_action(self, action, ignore_errors):
         rule_props = {}
         if action:
             if PacketAction.FORWARD == str(action).upper():
@@ -1740,31 +1794,19 @@ class AclLoader(object):
                 rule_props[RuleField.PACKET_ACTION] = PacketAction.DROP
             elif PacketAction.ACCEPT == str(action).upper():
                 rule_props[RuleField.PACKET_ACTION] = PacketAction.ACCEPT
-            elif "REDIRECT" == str(action).upper():
-                if action_object:
-                    rule_props[RuleField.REDIRECT_ACTION] = action_object
-                else:
-                    failure(f"{RuleField.REDIRECT_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
-            elif "MIRROR" == str(action).upper():
-                if action_object:
-                    rule_props[RuleField.MIRROR_ACTION] = action_object
-                else:
-                    failure(f"{RuleField.MIRROR_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
-            elif "MIRROR_INGRESS" == str(action).upper():
-                if action_object:
-                    rule_props[RuleField.MIRROR_INGRESS_ACTION] = action_object
-                else:
-                    failure(f"{RuleField.MIRROR_INGRESS_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
-            elif "MIRROR_EGRESS" == str(action).upper():
-                if action_object:
-                    rule_props[RuleField.MIRROR_EGRESS_ACTION] = action_object
-                else:
-                    failure(f"{RuleField.MIRROR_EGRESS_ACTION}: 'null' - Details: The action is missing an action object", ignore_errors)
+            elif re.match("(?i)^REDIRECT:[\w]+.*",str(action)):
+                rule_props[RuleField.REDIRECT_ACTION] = action.split(':')[1]
+            elif re.match("(?i)^MIRROR:[\w]+.*",str(action)):
+                rule_props[RuleField.MIRROR_ACTION] = action.split(':')[1]
+            elif re.match("(?i)^MIRROR_INGRESS:[\w]+.*",str(action)):
+                rule_props[RuleField.MIRROR_INGRESS_ACTION] = action.split(':')[1]
+            elif re.match("(?i)^MIRROR_EGRESS:[\w]+.*",str(action)):
+                rule_props[RuleField.MIRROR_EGRESS_ACTION] = action.split(':')[1]
             else:
-                failure(f"ACTION: {str(action).upper()} - Details: The action is invalid", ignore_errors)
+                failure(f"ACTION: {action} - Details: The action is invalid", ignore_errors)
         return rule_props
 
-    def convert_ether_type(self, ether_type, ignore_errors):
+    def map_ether_type(self, ether_type, ignore_errors):
         if ether_type:
             if str(ether_type).upper() in self.ethertype_map.keys():
                 return self.ethertype_map[str(ether_type).upper()]
@@ -1778,7 +1820,7 @@ class AclLoader(object):
             else:
                 failure(f"{RuleField.ETHER_TYPE}: {ether_type} - Details: Mapping failed due to an invalid value", ignore_errors)
 
-    def convert_ip_protocol(self, ip_protocol, ignore_errors):
+    def map_ip_protocol(self, ip_protocol, ignore_errors):
         if ip_protocol:
             if str(ip_protocol).upper() in self.ip_protocol_map:
                 return self.ip_protocol_map[str(ip_protocol).upper()]
@@ -1789,7 +1831,7 @@ class AclLoader(object):
 
 
     def load_rule(
-        self, rule_name, action, action_object, priority, ip_type, ether_type, ip_protocol, 
+        self, rule_name, action, priority, ip_type, ether_type, ip_protocol, 
         src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, src_l4_port_range, 
         dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, vlan_id, 
         src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp, ignore_errors=False
@@ -1831,9 +1873,9 @@ class AclLoader(object):
 
         fields = {
             RuleField.PRIORITY: priority,
-            RuleField.ETHER_TYPE: self.convert_ether_type(ether_type, ignore_errors),
+            RuleField.ETHER_TYPE: self.map_ether_type(ether_type, ignore_errors),
             RuleField.IP_TYPE: ip_type,
-            RuleField.IP_PROTOCOL: self.convert_ip_protocol(ip_protocol, ignore_errors),
+            RuleField.IP_PROTOCOL: self.map_ip_protocol(ip_protocol, ignore_errors),
             RuleField.SRC_IP: src_ip,
             RuleField.DST_IP: dst_ip,
             RuleField.SRC_IPV6: src_ipv6,
@@ -1855,9 +1897,9 @@ class AclLoader(object):
             RuleField.DSCP: dscp,
         }
         #Convert and add action to fields dict
-        fields.update(self.convert_action(action, action_object, ignore_errors))
+        fields.update(self.map_action(action, ignore_errors))
 
-        # Field Mapping
+        # Creating new rule data
         for field, value in fields.items():
             if value:
                 rule_props[field] = value
@@ -2202,8 +2244,7 @@ def delete(ctx, table, rule):
 # Main arguments
 @click.argument('table_name', type=click.STRING, required=True)
 @click.argument('rule_name', type=click.STRING, required=True)
-@click.argument('action', type=click.Choice(["FORWARD", "DROP", "ACCEPT", "REDIRECT", "MIRROR", "MIRROR_INGRESS", "MIRROR_EGRESS"], case_sensitive=False), metavar='ACTION', required=True)
-@click.option('--action_object', metavar="[text]", help="Required only for REDIRECT action (object) or MIRROR actions (session name).", type=click.STRING, required=False)
+@click.argument('action',type=click.STRING, metavar='ACTION', required=False)
 @click.option('--priority', type=click.INT, metavar="[num]", help="Rule priority.", required=False)
 # L2 options
 @click.option("--ip_type", type=click.STRING, metavar="[text]", help="L2 Protocol IP_TYPE field.", required=False)
@@ -2237,7 +2278,7 @@ def delete(ctx, table, rule):
 @click.option('--override_rule', is_flag=True, default=False, help="Override the existing rule if the new rule matches.")
 @click.pass_context
 def add(
-    ctx, table_name, rule_name, action, action_object, priority, ip_type, ether_type, 
+    ctx, table_name, rule_name, action, priority, ip_type, ether_type, 
     ip_protocol, src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, 
     src_l4_port_range, dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, 
     vlan_id, src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp,  
@@ -2246,17 +2287,25 @@ def add(
     """
     Add ACL rule.
     """
-    if (action == "redirect" or action == "mirror" or action == "mirror_ingress" or action == "mirror_egress" or action == "REDIRECT" or action == "MIRROR" or action == "MIRROR_INGRESS" or action == "MIRROR_EGRESS") and not action_object:
-        raise click.UsageError('Error: Missing option "--action_object". This option is required for actions: [REDIRECT, DO_NOT_NAT, MIRROR, MIRROR_INGRESS, MIRROR_EGRESS].')
+    if not action:
+        raise click.UsageError(""" Missing action. Choose from:
+            "FORWARD",
+            "DROP",
+            "ACCEPT",
+            "REDIRECT:<Object>",
+            "MIRROR:<Mirror session>",
+            "MIRROR_INGRESS:<Mirror session>",
+            "MIRROR_EGRESS:<Mirror session>".
+        """)
 
     if not priority:
-        raise click.UsageError('Error: Missing option "--priority".')
+        raise click.UsageError('Missing option "--priority".')
 
     acl_loader = ctx.obj["acl_loader"]
     acl_loader.set_table_name(table_name.upper())
 
     acl_loader.load_rule(
-        rule_name, action, action_object, priority, ip_type, ether_type, ip_protocol,
+        rule_name, action, priority, ip_type, ether_type, ip_protocol,
         src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, src_l4_port_range,
         dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, vlan_id,
         src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp, ignore_errors

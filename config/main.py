@@ -7241,8 +7241,7 @@ def parse_acl_table_info(table_name, table_type, description, ports, stage):
 # Main arguments
 @click.argument('table_name', metavar="<table_name>", type=click.STRING, required=True)
 @click.argument('rule_name', metavar="<rule_name>", type=click.STRING, required=True)
-@click.argument('action', metavar='<action>', type=click.Choice(["FORWARD", "DROP", "ACCEPT", "REDIRECT", "MIRROR", "MIRROR_INGRESS", "MIRROR_EGRESS"], case_sensitive=False), required=True)
-@click.option('--action_object', metavar="[text]", help="Required only for REDIRECT action (object) or MIRROR actions (session name).", type=click.STRING, required=False)
+@click.argument('action', metavar='<action>',type=click.STRING, required=False)
 @click.option('--priority', type=click.INT, metavar="[num]", help="Rule priority.", required=False)
 # L2 options
 @click.option("--ip_type", type=click.STRING, metavar="[text]", help="L2 Protocol IP_TYPE field.", required=False)
@@ -7275,7 +7274,7 @@ def parse_acl_table_info(table_name, table_type, description, ports, stage):
 @click.option('--ignore_errors', is_flag=True, default=False, help="Ignore errors.")
 @click.option('--override_rule', is_flag=True, default=False, help="Override the existing rule if the new rule matches.")
 def rule(
-    table_name, rule_name, action, action_object, priority, ip_type, ether_type, 
+    table_name, rule_name, action, priority, ip_type, ether_type, 
     ip_protocol, src_ip, dst_ip, src_ipv6, dst_ipv6, src_l4_port, dst_l4_port, 
     src_l4_port_range, dst_l4_port_range, icmp_code, icmp_type, icmpv6_code, icmpv6_type, 
     vlan_id, src_mac, dst_mac, in_ports, out_ports, tcp_flags, dscp,  
@@ -7285,8 +7284,8 @@ def rule(
     Add ACL rule
     """
     log.log_info("'acl add rule {}' executing...")
-    command = ['acl-loader', 'add', table_name, rule_name, action]
-    if action_object: command += [str(action_object)]
+    command = ['acl-loader', 'add', table_name, rule_name]
+    if action: command += [str(action)]
     if priority: command += ['--priority', str(priority)]
     if ip_type: command += ['--ip_type', str(ip_type)]
     if ether_type: command += ['--ether_type', str(ether_type)]
