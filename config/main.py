@@ -7239,9 +7239,9 @@ def parse_acl_table_info(table_name, table_type, description, ports, stage):
 
 @add.command()
 # Main arguments
-@click.argument('table-name', type=click.STRING, required=True)
-@click.argument('rule-name', type=click.STRING, required=True)
-@click.argument('action',type=click.STRING, metavar='ACTION', required=False)
+@click.argument('table-name', metavar="<table-name>", type=click.STRING, required=True)
+@click.argument('rule-name', metavar="<rule-name>", type=click.STRING, required=True)
+@click.argument('action',type=click.STRING, metavar='<action>', required=False)
 @click.option('--priority', type=click.INT, metavar="[num]", help="Rule priority.", required=False)
 # L2 options
 @click.option("--ip-type", type=click.STRING, metavar="[text]", help="L2 Protocol IP_TYPE field.", required=False)
