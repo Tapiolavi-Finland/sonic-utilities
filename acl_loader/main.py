@@ -1018,7 +1018,7 @@ class AclLoader(object):
             if not contains_lower(rule_name):
                 validating_failure(table_name, rule_name, f"The rule name contains lowercase characters", ignore_errors)
             if (table_name, rule_name) in set(self.rules_db_info.keys()):
-                validating_failure(table_name, rule_name, f"Rule exist", True)
+                validating_failure(table_name, rule_name, f"The rule already exists.", ignore_errors)
             if  len({(k) for k in self.rules_info.keys() if k[0] == table_name and k[1] == rule_name}) > 1:
                 validating_failure(table_name, rule_name, f"The provided ACL rule configuration contains multiple '{table_name}|{rule_name}' rules", ignore_errors)
         else:
@@ -1661,6 +1661,8 @@ class AclLoader(object):
     def combine_rules(self, override_rules=False):
         """
         Add existing rules to new rule table.
+        :param override_rules: Bool, If True, override existing rules when there is a match.
+        :return: Bool, Returns True if self.rules_info is different from the original self.rules_db_info.
         """
         temp_rules_db_info = self.rules_db_info.copy()
         try:
@@ -1672,6 +1674,10 @@ class AclLoader(object):
                         error(f"Table: {table_name} - Rule: {rule_name} - Rule not created. The rule already exists. Delete the existing rule or use the override option")
                         del self.rules_info[table_name, rule_name]
             self.rules_info.update(temp_rules_db_info)
+            if self.rules_info == self.rules_db_info:
+                return False
+            else:
+                return True 
         except AclLoaderException as ex:
             error("Error combining rules. Operation skipped." % ex)
 
@@ -2314,8 +2320,8 @@ def add(
     if not skip_validation:
         acl_loader.validate_rules_info(ignore_errors)
 
-    acl_loader.combine_rules(override_rule)
-    acl_loader.full_update()
+    if acl_loader.combine_rules(override_rule):
+        acl_loader.full_update()
 
 
 if __name__ == "__main__":
