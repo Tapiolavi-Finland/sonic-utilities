@@ -7147,6 +7147,29 @@ def acl():
     pass
 
 #
+# 'validate' subgroup ('config acl validate ...')
+#
+
+@acl.group(cls=clicommon.AbbreviationGroup)
+def Validate():
+    """
+    Validate ACL configuration.
+    """
+    pass
+
+#
+# 'rules' subgroup ('config acl validate rules ...')
+#
+
+@Validate.command()
+@click.argument('file_name', required=True)
+def rules(file_name):
+    """Validate ABNF Schema ACL rules configuration."""
+    log.log_info("'acl validate rulesl {}' executing...".format(file_name))
+    command = ['acl-loader', 'validate', 'abnf-rules', str(file_name)]
+    clicommon.run_command(command)
+
+#
 # 'add' subgroup ('config acl add ...')
 #
 

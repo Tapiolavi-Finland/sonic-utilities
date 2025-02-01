@@ -16,6 +16,8 @@ from sonic_py_common import multi_asic
 from swsscommon.swsscommon import SonicV2Connector, ConfigDBConnector
 from utilities_common.general import load_db_config
 
+validation_warning_count = 0
+
 def info(msg):
     click.echo(click.style("Info: ", fg='cyan') + click.style(str(msg), fg='green'))
     syslog.syslog(syslog.LOG_INFO, msg)
@@ -29,7 +31,9 @@ def warning(msg):
     syslog.syslog(syslog.LOG_WARNING, msg)
 
 def validation_warning(msg):
+    global validation_warning_count
     click.echo(click.style("ValidationWarning: ", fg='cyan') + click.style(str(msg), fg='yellow'))
+    validation_warning_count += 1
     syslog.syslog(syslog.LOG_WARNING, msg)
 
 def error(msg, raise_exception=False):
@@ -704,6 +708,28 @@ class AclLoader(object):
         return action_is_valid
 
     @staticmethod
+    def parse_acl_abnf_json(filename):
+        # Parse ABNF ACL rules
+        # If input falid return ABNF ACL rules else return an empty json object and create exception
+        with open(filename, 'r') as f:
+            plain_json = json.load(f)
+            if len(plain_json['ACL_RULE']) < 1:
+                raise AclLoaderException("Invalid input file %s" % filename)
+        return plain_json['ACL_RULE']
+
+    def load_acl_abnf_json(self, filename):
+        # Load ABNF ACL rules from file and adding valid file acl rules on self.rules_info dictonary
+
+        raw_rule_data = AclLoader.parse_acl_abnf_json(filename)
+        try:
+            rule_data = {(str(key).split("|")[0],str(key).split("|")[1]): value for key, value in raw_rule_data.items()}
+
+            # Load rule data
+            deep_update(self.rules_info, rule_data)
+        except AclLoaderException as ex:
+            error("Error processing rules file %s - %s" % (filename, ex))
+
+    @staticmethod
     def parse_acl_json(filename):
         yang_acl = pybindJSON.load(filename, openconfig_acl, "openconfig_acl")
         # Check pybindJSON parsing
@@ -1040,7 +1066,7 @@ class AclLoader(object):
         if value:
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
             else:
                 # Check if existing acl rule configuration (self.rules_db_info) has another rule with same PRIORITY value
@@ -1101,13 +1127,13 @@ class AclLoader(object):
         if value:
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif not value in self.ip_protocol_map.values():
+            elif not int(value) in self.ip_protocol_map.values():
                 validating_failure_value(table_name, rule_name, key, value, "The provided IP_PROTOCOL is not valid", ignore_errors)
-            elif RuleField.TCP_FLAGS in values and value != 6:
+            elif RuleField.TCP_FLAGS in values and int(value) != 6:
                 validating_failure_value(table_name, rule_name,key, value,  "IP_PROTOCOL value is not TCP, but TCP flags were provided", ignore_errors)
-            elif (RuleField.ICMP_TYPE in values or RuleField.ICMP_CODE in values) and value != 1:
+            elif (RuleField.ICMP_TYPE in values or RuleField.ICMP_CODE in values) and int(value) != 1:
                 validating_failure_value(table_name, rule_name, key, value, "IP_PROTOCOL value is not ICMP, but ICMP fields were provided", ignore_errors)
-            elif (RuleField.ICMPV6_TYPE in values or RuleField.ICMPV6_CODE in values) and value != 58:
+            elif (RuleField.ICMPV6_TYPE in values or RuleField.ICMPV6_CODE in values) and int(value) != 58:
                 validating_failure_value(table_name, rule_name, key, value, "IP_PROTOCOL value is not ICMPV6, but ICMPV6 fields were provided", ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1123,11 +1149,11 @@ class AclLoader(object):
         :return: None
         """
         if value: 
-            if not value in self.iptype_map:
+            if not str(value) in self.iptype_map:
                 validating_failure_value(table_name, rule_name, key, value, "The provided IP_TYPE is not valid", ignore_errors) 
-            elif self.is_table_l3v6(table_name) and  value == self.iptype_map["IPV4"] or value == self.iptype_map["IPV4ANY"] or value == self.iptype_map["NON_IPv6"]:
+            elif self.is_table_l3v6(table_name) and  str(value) == "IPV4" or str(value) == "IPV4ANY" or str(value) == "NON_IPv6":
                 validating_failure_value(table_name, rule_name, key, value, "Invalid value for IPv6 table", ignore_errors)
-            elif self.is_table_l3(table_name) and value == self.iptype_map["IPV6"] or value == self.iptype_map["IPV6ANY"] or value == self.iptype_map["NON_IPv4"]:
+            elif self.is_table_l3(table_name) and str(value) == "IPV6" or str(value)== "IPV6ANY" or str(value) == "NON_IPv4":
                 validating_failure_value(table_name, rule_name, key, value, "The provided parameter is not valid for the IPv4 table", ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1148,7 +1174,7 @@ class AclLoader(object):
                     validating_failure_value(table_name, rule_name, key, value, "The provided ETHER_TYPE is not valid", ignore_errors)
                 elif self.is_table_l3v6(table_name):
                     validating_failure_value(table_name, rule_name, key, value, "ETHER_TYPE is not supported for DATAACLV6. Use the IP_TYPE rule parameter for IPv6 tables", ignore_errors)
-                elif self.is_table_l3(table_name) and value == self.ethertype_map["ETHERTYPE_IPV6"]:
+                elif self.is_table_l3(table_name) and int(value) == self.ethertype_map["ETHERTYPE_IPV6"]:
                     validating_failure_value(table_name, rule_name, key, value, "The provided parameter is not valid for the IPv4 table", ignore_errors) 
             else:
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
@@ -1208,7 +1234,7 @@ class AclLoader(object):
         if value: 
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1256,7 +1282,7 @@ class AclLoader(object):
         if value: 
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1278,7 +1304,7 @@ class AclLoader(object):
         if value: 
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1300,7 +1326,7 @@ class AclLoader(object):
         if value: 
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
         else:
             validating_failure_value_missing(table_name, rule_name, key, ignore_errors)
@@ -1373,7 +1399,7 @@ class AclLoader(object):
         if value: 
             if not is_value_int(value):
                 validating_failure_value(table_name, rule_name, key, value, "The provided value is not an integer", ignore_errors)
-            elif value < min_value or value > max_value:
+            elif int(value) < min_value or int(value) > max_value:
                 validating_failure_value_range(table_name, rule_name, key, value, min_value, max_value, ignore_errors)
             elif not self.is_table_mirror(table_name):
                 validating_failure_value(table_name, rule_name, key, value, "This value is not allowed for non-mirror tables", ignore_errors)
@@ -2244,6 +2270,33 @@ def delete(ctx, table, rule):
     acl_loader = ctx.obj["acl_loader"]
 
     acl_loader.delete(table, rule)
+
+
+@cli.group()
+@click.pass_context
+def Validate(ctx):
+    """
+    Validate ACL configuration.
+    """
+    pass
+
+@Validate.command()
+@click.argument('filename', type=click.Path(exists=True))
+@click.pass_context
+def abnf_rules(ctx, filename):
+    """
+    Validate ACL ABNF Schema Rules.
+    :return:
+    """
+    acl_loader = ctx.obj["acl_loader"]
+
+    acl_loader.load_acl_abnf_json(filename)
+    acl_loader.validate_rules_info(True)
+
+    if validation_warning_count == 0:
+        print("The provided acl rules are valid.")
+    else:
+        print(f"The provided acl rules contains {validation_warning_count} warnings!")
 
 
 @cli.command()
