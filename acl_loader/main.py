@@ -1043,7 +1043,7 @@ class AclLoader(object):
         if rule_name:
             if not contains_lower(rule_name):
                 validating_failure(table_name, rule_name, f"The rule name contains lowercase characters", ignore_errors)
-            if (table_name, rule_name) in set(self.rules_db_info.keys()):
+            if ((table_name, rule_name) in set(self.rules_db_info.keys())) and ignore_errors:
                 validating_failure(table_name, rule_name, f"The rule already exists.", ignore_errors)
             if  len({(k) for k in self.rules_info.keys() if k[0] == table_name and k[1] == rule_name}) > 1:
                 validating_failure(table_name, rule_name, f"The provided ACL rule configuration contains multiple '{table_name}|{rule_name}' rules", ignore_errors)
@@ -2375,6 +2375,7 @@ def add(
 
     if acl_loader.combine_rules(override_rule):
         acl_loader.full_update()
+        print("Rule created")
 
 
 if __name__ == "__main__":
