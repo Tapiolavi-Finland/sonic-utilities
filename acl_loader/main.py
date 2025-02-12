@@ -1906,7 +1906,7 @@ class AclLoader(object):
         fields = {
             RuleField.PRIORITY: priority,
             RuleField.ETHER_TYPE: self.map_ether_type(ether_type, ignore_errors),
-            RuleField.IP_TYPE: ip_type,
+            RuleField.IP_TYPE: ip_type.upper(),
             RuleField.IP_PROTOCOL: self.map_ip_protocol(ip_protocol, ignore_errors),
             RuleField.SRC_IP: src_ip,
             RuleField.DST_IP: dst_ip,
