@@ -1852,6 +1852,10 @@ class AclLoader(object):
             else:
                 failure(f"{RuleField.ETHER_TYPE}: {ether_type} - Details: Mapping failed due to an invalid value", ignore_errors)
 
+    def map_ip_type(self, ip_type, ignore_errors):
+        if ip_type:
+            return ip_type.upper()
+
     def map_ip_protocol(self, ip_protocol, ignore_errors):
         if ip_protocol:
             if str(ip_protocol).upper() in self.ip_protocol_map:
@@ -1906,7 +1910,7 @@ class AclLoader(object):
         fields = {
             RuleField.PRIORITY: priority,
             RuleField.ETHER_TYPE: self.map_ether_type(ether_type, ignore_errors),
-            RuleField.IP_TYPE: ip_type.upper(),
+            RuleField.IP_TYPE: self.map_ip_type(ip_type, ignore_errors),
             RuleField.IP_PROTOCOL: self.map_ip_protocol(ip_protocol, ignore_errors),
             RuleField.SRC_IP: src_ip,
             RuleField.DST_IP: dst_ip,
